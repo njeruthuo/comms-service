@@ -6,10 +6,15 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/njeruthuo/comms-service/emails"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("no .env file found, using environment variables")
+	}
+
 	db, err := DatabaseConnect()
 	if err != nil {
 		log.Fatal(err)

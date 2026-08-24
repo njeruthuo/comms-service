@@ -4,17 +4,19 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-)
 
-var (
-	DatabaseName     = os.Getenv("DatabaseName")
-	DatabaseUser     = os.Getenv("DatabaseUser")
-	DatabaseHost     = os.Getenv("DatabaseHost")
-	DatabasePassword = os.Getenv("DatabasePassword")
+	_ "github.com/lib/pq"
 )
 
 func DatabaseConnect() (*sql.DB, error) {
-	dbInfo := fmt.Sprintf("user=%s password=%s host=%s dbname=%s sslmode=disabled",
+	var (
+		DatabaseName     = os.Getenv("DatabaseName")
+		DatabaseUser     = os.Getenv("DatabaseUser")
+		DatabaseHost     = os.Getenv("DatabaseHost")
+		DatabasePassword = os.Getenv("DatabasePassword")
+	)
+
+	dbInfo := fmt.Sprintf("user=%s password=%s host=%s dbname=%s sslmode=disable",
 		DatabaseUser, DatabasePassword, DatabaseHost, DatabaseName,
 	)
 

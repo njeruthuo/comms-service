@@ -1,32 +1,23 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"net/http"
+	"os"
 
-	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
-	"github.com/njeruthuo/comms-service/emails"
+	"github.com/njeruthuo/comms-service/messaging"
 )
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Println("no .env file found, using environment variables")
+		log.Println("No .env file found, relying on environment variables")
 	}
 
-	db, err := DatabaseConnect()
+	r, err := messaging.NewRabbitMQChannel()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("There was a problem connecting to the channel: " + err.Error())
 	}
-	defer db.Close()
+	defer r.Close()
 
-	emailsHandler := emails.DBHandler{
-		DB: db,
-	}
-
-	router := mux.NewRouter()
-	router.HandleFunc("/comms/send", emailsHandler.SendHandler)
-	fmt.Println("Server started on port 8001")
-	log.Fatal(http.ListenAndServe(":8001", router))
+	r.ReadRabbitMQChannel(os.Getenv("REDIS_QUEUE_NAME"))
 }

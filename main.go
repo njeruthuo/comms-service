@@ -16,6 +16,8 @@ func main() {
 	r, err := messaging.NewRabbitMQChannel()
 	if err != nil {
 		log.Fatal("There was a problem connecting to the channel: " + err.Error())
+	} else {
+		log.Println(r.String())
 	}
 	defer r.Close()
 

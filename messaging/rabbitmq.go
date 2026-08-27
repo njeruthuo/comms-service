@@ -1,10 +1,12 @@
 package messaging
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 
+	"github.com/njeruthuo/comms-service/emails"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -79,6 +81,20 @@ func (r *RabbitMQ) ReadRabbitMQChannel(queueName string) {
 
 	for msg := range msgs {
 		log.Printf("received message: %s", msg.Body)
+
+		var emailPayload emails.EmailPayload
+		if err := json.Unmarshal(msg.Body, &emailPayload); err != nil {
+			log.Printf("failed to decode message: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
+		if err := emails.SendEmailService(emailPayload.Email, "Password reset request", emailPayload.Token); err != nil {
+			log.Printf("failed to send email: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
 		msg.Ack(false)
 	}
 }

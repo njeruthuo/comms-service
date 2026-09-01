@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
+	"github.com/njeruthuo/comms-service/audit"
 	"github.com/njeruthuo/comms-service/emails"
 	"github.com/njeruthuo/comms-service/sms"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -15,6 +17,7 @@ const (
 	passwordResetQueue     = "REDIS_PASSWORD_RESET_QUEUE_NAME"
 	emailVerificationQueue = "REDIS_EMAIL_VERIFICATION_QUEUE_NAME"
 	phoneVerificationQueue = "REDIS_PHONE_VERIFICATION_QUEUE_NAME"
+	AuditLogQueue          = "audit_logs"
 )
 
 type RabbitMQ struct {
@@ -55,6 +58,36 @@ func (r *RabbitMQ) String() string {
 	return "RabbitMQ connected!"
 }
 
+func (r *RabbitMQ) PublishJSON(queueName string, payload any) error {
+	if _, err := r.Ch.QueueDeclare(
+		queueName,
+		true,  // durable: survives a broker restart
+		false, // autoDelete
+		false, // exclusive
+		false, // noWait
+		nil,   // args
+	); err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	return r.Ch.Publish(
+		"",        // default exchange
+		queueName, // routing key = queue name
+		false,     // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         body,
+		},
+	)
+}
+
 func (r *RabbitMQ) ReadRabbitMQChannel(queueName, name string) {
 	if queueName == "" {
 		log.Fatalf("%s is not set", name)
@@ -89,13 +122,21 @@ func (r *RabbitMQ) ReadRabbitMQChannel(queueName, name string) {
 	for msg := range msgs {
 		log.Printf("received message: %s", msg.Body)
 
-		var err error
+		var (
+			err          error
+			action       string
+			resourceType string
+		)
+		
 		switch name {
 		case passwordResetQueue:
+			action, resourceType = "password_reset.notification_sent", "email"
 			err = handleEmail(msg.Body, "Password reset request")
 		case emailVerificationQueue:
+			action, resourceType = "email_verification.notification_sent", "email"
 			err = handleEmail(msg.Body, "Verify your email address")
 		case phoneVerificationQueue:
+			action, resourceType = "phone_verification.notification_sent", "sms"
 			err = handleSMS(msg.Body)
 		default:
 			log.Printf("no handler for queue %q, discarding message", name)
@@ -109,8 +150,39 @@ func (r *RabbitMQ) ReadRabbitMQChannel(queueName, name string) {
 			continue
 		}
 
+		recipient := auditRecipient(msg.Body)
+		auditLog := audit.AuditLog{
+			ServiceName:  "comms-service",
+			Environment:  os.Getenv("ENVIRONMENT"), // blank => DB default 'production'
+			ActorType:    "system",
+			Action:       action,
+			ResourceType: resourceType,
+			ResourceID:   &recipient,
+			Status:       audit.StatusSuccess,
+			Metadata:     json.RawMessage(fmt.Sprintf(`{"queue":%q}`, queueName)),
+			OccurredAt:   time.Now().UTC(),
+		}
+		if err := r.PublishJSON(AuditLogQueue, auditLog); err != nil {
+			log.Printf("failed to publish audit log for %s: %v", name, err)
+		}
+
 		msg.Ack(false)
 	}
+}
+
+// auditRecipient pulls the message target (email address or phone number) out
+// of a queue payload for use as an audit resource identifier. The token is
+// intentionally left out so secrets never land in the audit trail.
+func auditRecipient(body []byte) string {
+	var p struct {
+		Email string `json:"email"`
+		Phone string `json:"phone"`
+	}
+	_ = json.Unmarshal(body, &p)
+	if p.Email != "" {
+		return p.Email
+	}
+	return p.Phone
 }
 
 // handleEmail decodes an email payload and sends it through the existing
